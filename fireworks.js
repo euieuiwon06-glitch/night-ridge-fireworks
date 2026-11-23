@@ -241,7 +241,7 @@
   const flakes = [];
   function newFlake(y) {
     const z = Math.random();                       // 0 = 멀리, 1 = 가까이
-    const size = z < 0.6 ? 1 : z < 0.92 ? 2 : 3;   // 1칸 점 / 2칸 / 3칸 십자
+    const size = z < 0.85 ? 1 : 2;                // 대부분 1칸 점, 가까운 것만 2칸 가로점
     return {
       x: rand(0, W), y: y ?? rand(-20, -2),
       vy: (0.12 + z * 0.35) * SNOW_SPEED,
@@ -257,18 +257,18 @@
       f.ph += f.fr;
       f.y += f.vy;
       f.x += Math.sin(f.ph) * f.sway * 0.25;
-      if (f.y > H + 3) flakes[i] = newFlake();
+      if (f.y > H + 3 || (ready && f.y > ridge[Math.max(0, Math.min(W - 1, f.x | 0))] + 4)) flakes[i] = newFlake();
       else if (f.x < -3) f.x += W + 6;
       else if (f.x > W + 3) f.x -= W + 6;
     }
   }
   function drawSnow() {
-    const put = (x, y) => { if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = WHITE; };
+    // 산 레이어(불투명) 위에는 안 그림 → 눈이 산 뒤로 사라짐
+    const put = (x, y) => { if (x >= 0 && y >= 0 && x < W && y < H && !landA[y * W + x]) px[y * W + x] = WHITE; };
     for (const f of flakes) {
       const x = f.x | 0, y = f.y | 0;
-      if (f.size === 1) put(x, y);
-      else if (f.size === 2) { put(x, y); put(x + 1, y); put(x, y + 1); put(x + 1, y + 1); }
-      else { put(x, y); put(x - 1, y); put(x + 1, y); put(x, y - 1); put(x, y + 1); }
+      put(x, y);
+      if (f.size === 2) put(x + 1, y);
     }
   }
 
