@@ -13,7 +13,7 @@
   const HOLD = 0.45;             // 수명 중 이 비율까지는 최대 밝기 유지
   const TAIL_CURVE = 0.4;        // 꼬리 밝기 곡선(<1 이면 꼬리가 오래 밝음)
   const COLOR_RADIUS = 40;       // 이 거리(×SIZE)에서 거의 흰색이 됨
-  const SNOW = 150;              // 눈송이 수
+  const SNOW = 80;               // 눈송이 수
   const SNOW_SPEED = 1;          // 눈 내리는 속도 배율
   const FLASH = 34;            // 중심 빛무리 지속 프레임
   // ────────────────────────────────────────────────────────
