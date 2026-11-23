@@ -12,7 +12,8 @@
   const LIFE = 1.6;              // 불꽃 지속 시간 배율
   const HOLD = 0.45;             // 수명 중 이 비율까지는 최대 밝기 유지
   const TAIL_CURVE = 0.4;        // 꼬리 밝기 곡선(<1 이면 꼬리가 오래 밝음)
-  const FLASH = 34;              // 중심 빛무리 지속 프레임
+  const COLOR_RADIUS = 40;       // 이 거리(×SIZE)에서 거의 흰색이 됨
+  const FLASH = 34;            // 중심 빛무리 지속 프레임
   // ────────────────────────────────────────────────────────
 
   const cv = document.getElementById("c");
@@ -21,6 +22,31 @@
   const px = new Uint32Array(img.data.buffer);
   const glow = new Float32Array(W * H);     // 이번 프레임 밝기(0..1)
   const BLACK = 0xff000000, WHITE = 0xffffffff;
+
+  // 무지개 7색 — 터질 때마다 하나를 무작위로
+  const RAINBOW = [
+    [255, 40, 40],   // 빨강
+    [255, 140, 0],   // 주황
+    [255, 220, 0],   // 노랑
+    [40, 210, 70],   // 초록
+    [30, 120, 255],  // 파랑
+    [80, 70, 255],   // 남색
+    [190, 70, 255],  // 보라
+  ];
+  const LUT = 32;
+  const COLOR_EDGE = 0.82;  // 바깥 끝에서 흰색이 섞이는 정도(1 = 완전 흰색)
+  // 중심(0) = 가장 진한 색, 바깥(1) = 흰색에 가깝게. COLOR_CURVE <1 이면 진한 영역이 좁음
+  const COLOR_CURVE = 1.1;
+  function makeLut([r, g, b]) {
+    const lut = new Uint32Array(LUT);
+    for (let k = 0; k < LUT; k++) {
+      const t = COLOR_EDGE * Math.pow(k / (LUT - 1), COLOR_CURVE);
+      const m = (c) => Math.round(c + (255 - c) * t);
+      lut[k] = (0xff000000 | (m(b) << 16) | (m(g) << 8) | m(r)) >>> 0;
+    }
+    return lut;
+  }
+  const LUTS = RAINBOW.map(makeLut);
 
   const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const thr = new Float32Array(W * H);
@@ -67,11 +93,20 @@
   fit();
 
   // ── 그리기 도구 ─────────────────────────────────────────
+  // 색: 지금 그리는 불꽃(cur)의 중심에서 멀수록 진한 색 → 흰색 쪽으로 옅어짐
+  const col = new Uint32Array(W * H).fill(WHITE);
+  let cur = null;
   function plot(x, y, b) {
     x |= 0; y |= 0;
     if (x < 0 || y < 0 || x >= W || y >= H) return;
     const i = y * W + x;
-    if (b > glow[i]) glow[i] = b;
+    if (b > glow[i]) {
+      glow[i] = b;
+      if (cur) {
+        const d = Math.hypot(x - cur.x, y - cur.y) / cur.R;
+        col[i] = cur.lut[Math.min(LUT - 1, (d * (LUT - 1)) | 0)];
+      } else col[i] = WHITE;
+    }
   }
   function line(x0, y0, x1, y1, b0, b1) {
     const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
@@ -104,6 +139,7 @@
       grav: o.grav,
       tail: o.tail,          // 꼬리 길이(지난 위치 수)
       hist: [],
+      burst: spawning,       // 어느 불꽃 소속인지(색 계산용), 불줄기 불씨는 null=흰색
       width: o.width || 1,
       twinkle: o.twinkle || 0,
       fade: o.fade || 1.6,   // 밝기 곡선 지수
@@ -189,9 +225,13 @@
                    wob: rand(0, 6.28), kind: KINDS[kind] ? kind : pick(KIND_POOL) });
   }
 
+  let spawning = null;
   function burst(r) {
-    flashes.push({ x: r.tx, y: r.ty, t: 0 });
+    const B = { x: r.tx, y: r.ty, R: COLOR_RADIUS * SIZE, lut: pick(LUTS) };
+    flashes.push({ x: r.tx, y: r.ty, t: 0, burst: B });
+    spawning = B;
     KINDS[r.kind](r.tx, r.ty);
+    spawning = null;
     if (parts.length > MAX_PARTICLES) parts.splice(0, parts.length - MAX_PARTICLES);
   }
 
@@ -229,14 +269,17 @@
     for (const f of flashes) {
       // 중심 빛무리: 커지며 디더 점으로 흩어짐
       const k = 1 - f.t / FLASH;
+      cur = f.burst;
       disc(f.x, f.y, (4 + f.t * 0.45) | 0, 1.5 * Math.pow(k, 1.4));
     }
+    cur = null;
     for (const r of rockets) {
       line(r.px, r.py + 5, r.x, r.y, 0.55, 1);
       line(r.x, r.y + 5, r.x, r.y + 14, 0.5, 0.1);       // 짧은 불꼬리
     }
     for (const p of parts) {
       // 수명 앞 절반은 온전히 밝고, 뒤 절반에 사라짐
+      cur = p.burst;
       const u = p.age / p.life;
       let b = u < HOLD ? 1 : Math.pow(1 - (u - HOLD) / (1 - HOLD), p.fade);
       if (p.twinkle && Math.random() < p.twinkle * u) b *= 0.1;
@@ -255,8 +298,9 @@
 
     for (let i = 0; i < px.length; i++) {
       if (landA[i]) px[i] = landW[i] ? WHITE : BLACK;
-      else px[i] = glow[i] > thr[i] ? WHITE : BLACK;
+      else px[i] = glow[i] > thr[i] ? col[i] : BLACK;
     }
+    cur = null;
     ctx.putImageData(img, 0, 0);
   }
 
