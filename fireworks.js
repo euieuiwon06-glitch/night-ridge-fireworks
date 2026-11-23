@@ -15,6 +15,10 @@
   const COLOR_RADIUS = 40;       // 이 거리(×SIZE)에서 거의 흰색이 됨
   const SNOW = 80;               // 눈송이 수
   const SNOW_SPEED = 1;          // 눈 내리는 속도 배율
+  const GLOW_LIFE = 95;          // 산에 비친 불빛 지속 프레임
+  const GLOW_RX = 120;           // 불빛이 비치는 좌우 범위(칸)
+  const GLOW_DEPTH = 42;         // 능선에서 아래로 비치는 깊이(칸)
+  const GLOW_MAX = 1.0;          // 가장 강할 때 색이 섞이는 정도(1 = 완전히 그 색)
   const FLASH = 34;            // 중심 빛무리 지속 프레임
   // ────────────────────────────────────────────────────────
 
@@ -79,6 +83,15 @@
         if (run === 6) { ridge[x] = y; break; }
       }
     }
+    // 산에 불빛이 비칠 후보: 능선 아래 GLOW_DEPTH 안의 흰 픽셀
+    const ids = [], ds = [];
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x, d = y - ridge[x];
+        if (landA[i] && landW[i] && d >= -2 && d < GLOW_DEPTH) { ids.push(i); ds.push(Math.max(0, d)); }
+      }
+    litIdx = Int32Array.from(ids);
+    litDepth = Float32Array.from(ds);
     ready = true;
   };
   mimg.src = window.MOUNTAINS_PNG;
@@ -229,7 +242,9 @@
 
   let spawning = null;
   function burst(r) {
-    const B = { x: r.tx, y: r.ty, R: COLOR_RADIUS * SIZE, lut: pick(LUTS) };
+    const ci = (Math.random() * RAINBOW.length) | 0;
+    const B = { x: r.tx, y: r.ty, R: COLOR_RADIUS * SIZE, lut: LUTS[ci] };
+    lights.push({ x: r.tx, y: r.ty, rgb: RAINBOW[ci], t: 0 });
     flashes.push({ x: r.tx, y: r.ty, t: 0, burst: B });
     spawning = B;
     KINDS[r.kind](r.tx, r.ty);
@@ -250,6 +265,31 @@
     };
   }
   for (let i = 0; i < SNOW; i++) flakes.push(newFlake(rand(0, H)));
+
+  // ── 산에 비치는 불빛 ─────────────────────────────────────
+  const lights = [];
+  let litIdx = new Int32Array(0), litDepth = new Float32Array(0);
+  function drawMountainGlow() {
+    if (!lights.length) return;
+    for (let n = 0; n < litIdx.length; n++) {
+      const i = litIdx[n], x = i % W;
+      let best = 0, rgb = null;
+      for (const L of lights) {
+        // 시간: 터질 때 빠르게 밝아졌다 천천히 사라짐
+        const env = L.t < 4 ? L.t / 4 : Math.exp(-(L.t - 4) / (GLOW_LIFE * 0.45));
+        const fx = 1 - Math.abs(x - L.x) / GLOW_RX;
+        if (fx <= 0) continue;
+        const h = Math.max(0, ridge[Math.max(0, Math.min(W - 1, L.x | 0))] - L.y);
+        const fv = Math.max(0.75, 1 - h / 400);           // 높이 터질수록 조금 약하게
+        const s = env * fv * Math.pow(fx, 1.4) * Math.pow(1 - litDepth[n] / GLOW_DEPTH, 1.3);
+        if (s > best) { best = s; rgb = L.rgb; }
+      }
+      if (!rgb || best < 0.04) continue;
+      const k = Math.min(1, best * 1.7) * GLOW_MAX;
+      const m = (c) => Math.round(255 + (c - 255) * k);
+      px[i] = (0xff000000 | (m(rgb[2]) << 16) | (m(rgb[1]) << 8) | m(rgb[0])) >>> 0;
+    }
+  }
 
   function updateSnow() {
     for (let i = 0; i < flakes.length; i++) {
@@ -298,6 +338,7 @@
       if (++p.age > p.life) parts.splice(i, 1);
     }
     for (let i = flashes.length - 1; i >= 0; i--) if (++flashes[i].t > FLASH) flashes.splice(i, 1);
+    for (let i = lights.length - 1; i >= 0; i--) if (++lights[i].t > GLOW_LIFE) lights.splice(i, 1);
   }
 
   // ── 렌더 ───────────────────────────────────────────────
@@ -339,6 +380,7 @@
       else px[i] = glow[i] > thr[i] ? col[i] : BLACK;
     }
     cur = null;
+    drawMountainGlow();
     drawSnow();
     ctx.putImageData(img, 0, 0);
   }
