@@ -15,7 +15,7 @@
   const COLOR_RADIUS = 40;       // 이 거리(×SIZE)에서 거의 흰색이 됨
   const SNOW = 80;               // 눈송이 수
   const SNOW_SPEED = 1;          // 눈 내리는 속도 배율
-  const GLOW_LIFE = 95;          // 산에 비친 불빛 지속 프레임
+  const GLOW_LIFE = 130;         // 산에 비친 불빛 지속 프레임
   const GLOW_RX = 120;           // 불빛이 비치는 좌우 범위(칸)
   const GLOW_DEPTH = 42;         // 능선에서 아래로 비치는 깊이(칸)
   const GLOW_MAX = 1.0;          // 가장 강할 때 색이 섞이는 정도(1 = 완전히 그 색)
@@ -276,7 +276,8 @@
       let best = 0, rgb = null;
       for (const L of lights) {
         // 시간: 터질 때 빠르게 밝아졌다 천천히 사라짐
-        const env = L.t < 4 ? L.t / 4 : Math.exp(-(L.t - 4) / (GLOW_LIFE * 0.45));
+        // 끝(GLOW_LIFE)에서 정확히 0이 되고 기울기도 0 → 뚝 끊기지 않음
+        const env = L.t < 4 ? L.t / 4 : Math.pow(1 - (L.t - 4) / (GLOW_LIFE - 4), 2.6);
         const fx = 1 - Math.abs(x - L.x) / GLOW_RX;
         if (fx <= 0) continue;
         const h = Math.max(0, ridge[Math.max(0, Math.min(W - 1, L.x | 0))] - L.y);
@@ -284,7 +285,7 @@
         const s = env * fv * Math.pow(fx, 1.4) * Math.pow(1 - litDepth[n] / GLOW_DEPTH, 1.3);
         if (s > best) { best = s; rgb = L.rgb; }
       }
-      if (!rgb || best < 0.04) continue;
+      if (!rgb || best <= 0.002) continue;
       const k = Math.min(1, best * 1.7) * GLOW_MAX;
       const m = (c) => Math.round(255 + (c - 255) * k);
       px[i] = (0xff000000 | (m(rgb[2]) << 16) | (m(rgb[1]) << 8) | m(rgb[0])) >>> 0;
