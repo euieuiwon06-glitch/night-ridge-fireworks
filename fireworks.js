@@ -13,6 +13,8 @@
   const HOLD = 0.45;             // 수명 중 이 비율까지는 최대 밝기 유지
   const TAIL_CURVE = 0.4;        // 꼬리 밝기 곡선(<1 이면 꼬리가 오래 밝음)
   const COLOR_RADIUS = 40;       // 이 거리(×SIZE)에서 거의 흰색이 됨
+  const SNOW = 150;              // 눈송이 수
+  const SNOW_SPEED = 1;          // 눈 내리는 속도 배율
   const FLASH = 34;            // 중심 빛무리 지속 프레임
   // ────────────────────────────────────────────────────────
 
@@ -235,8 +237,44 @@
     if (parts.length > MAX_PARTICLES) parts.splice(0, parts.length - MAX_PARTICLES);
   }
 
+  // ── 눈: 클릭과 상관없이 늘 내림. 멀리(작고 느림)·가까이(크고 빠름) 세 겹 ──
+  const flakes = [];
+  function newFlake(y) {
+    const z = Math.random();                       // 0 = 멀리, 1 = 가까이
+    const size = z < 0.6 ? 1 : z < 0.92 ? 2 : 3;   // 1칸 점 / 2칸 / 3칸 십자
+    return {
+      x: rand(0, W), y: y ?? rand(-20, -2),
+      vy: (0.12 + z * 0.35) * SNOW_SPEED,
+      sway: rand(0.15, 0.5) * (0.5 + z), ph: rand(0, 6.28), fr: rand(0.01, 0.03),
+      size,
+    };
+  }
+  for (let i = 0; i < SNOW; i++) flakes.push(newFlake(rand(0, H)));
+
+  function updateSnow() {
+    for (let i = 0; i < flakes.length; i++) {
+      const f = flakes[i];
+      f.ph += f.fr;
+      f.y += f.vy;
+      f.x += Math.sin(f.ph) * f.sway * 0.25;
+      if (f.y > H + 3) flakes[i] = newFlake();
+      else if (f.x < -3) f.x += W + 6;
+      else if (f.x > W + 3) f.x -= W + 6;
+    }
+  }
+  function drawSnow() {
+    const put = (x, y) => { if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = WHITE; };
+    for (const f of flakes) {
+      const x = f.x | 0, y = f.y | 0;
+      if (f.size === 1) put(x, y);
+      else if (f.size === 2) { put(x, y); put(x + 1, y); put(x, y + 1); put(x + 1, y + 1); }
+      else { put(x, y); put(x - 1, y); put(x + 1, y); put(x, y - 1); put(x, y + 1); }
+    }
+  }
+
   // ── 갱신 ───────────────────────────────────────────────
   function update() {
+    updateSnow();
     for (let i = rockets.length - 1; i >= 0; i--) {
       const r = rockets[i];
       r.t++;
@@ -301,6 +339,7 @@
       else px[i] = glow[i] > thr[i] ? col[i] : BLACK;
     }
     cur = null;
+    drawSnow();
     ctx.putImageData(img, 0, 0);
   }
 
