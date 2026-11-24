@@ -100,7 +100,8 @@
   function fit() {
     const dpr = window.devicePixelRatio || 1;
     const k = Math.min(innerWidth * dpr / W, innerHeight * dpr / H);
-    const s = (k >= 1 ? Math.floor(k) : k) / dpr;
+    // 정수배가 화면의 90% 이상을 채우면 정수배(픽셀 고르게), 아니면 꽉 채우기
+    const s = (k >= 1 && Math.floor(k) / k >= 0.9 ? Math.floor(k) : k) / dpr;
     cv.style.width = W * s + "px";
     cv.style.height = H * s + "px";
   }
