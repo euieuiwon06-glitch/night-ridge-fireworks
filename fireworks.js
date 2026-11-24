@@ -432,6 +432,17 @@
   addEventListener("contextmenu", (e) => e.preventDefault());
 
   // 확인용: window.__fw.launch(x, y)
-  window.__fw = { launch, hands: [], visTop, get count() { return parts.length + rockets.length; } };
+  // 원 그리기 축포: 하늘 여기저기에서 무작위로 연달아
+  function show() {
+    let minRidge = H;
+    for (let x = 0; x < W; x++) minRidge = Math.min(minRidge, ridge[x]);
+    const n = 7 + ((Math.random() * 3) | 0);
+    let t = 0;
+    for (let i = 0; i < n; i++) {
+      t += rand(90, 200);
+      setTimeout(() => launch(rand(24, W - 24), rand(visTop + 18, minRidge - 45), pick(KIND_POOL)), t);
+    }
+  }
+  window.__fw = { launch, show, hands: [], visTop, get count() { return parts.length + rockets.length; } };
   fit();
 })();

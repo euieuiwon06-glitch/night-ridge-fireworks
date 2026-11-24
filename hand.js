@@ -4,11 +4,14 @@ const VISION = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 // ── 조절값 ───────────────────────────────────────────────
-const OPEN_T = 1.55;     // 손가락끝-손목 거리 / 손바닥 길이 가 이보다 크면 '편 손'
-const CLOSE_T = 1.15;    // 이보다 작으면 '쥔 손'
+const OPEN_T = 1.45;     // 손가락끝-손목 거리 / 손바닥 길이 가 이보다 크면 '편 손' (쉽게: 1.55→1.45)
+const CLOSE_T = 1.3;     // 이보다 작으면 '쥔 손' (쉽게: 1.15→1.3)
 const BLINK_MS = 1000;   // 편 손 → 쥠 → 다시 펴기 를 이 시간 안에 하면 발사
 const COOLDOWN_MS = 250; // 연속 발사 최소 간격(손마다)
 const LOST_MS = 400;     // 손이 이 시간 넘게 안 보이면 상태 초기화
+const CIRCLE_MS = 1400;  // 검지 끝 궤적을 이 시간만큼 보고 원인지 판단
+const CIRCLE_TURN = 0.9; // 한 바퀴(360°)의 이 비율 이상 돌면 원
+const CIRCLE_COOL = 1500;// 원 축포 후 다음 원까지 최소 간격
 // ────────────────────────────────────────────────────────
 
 const W = 372, H = 465;
@@ -34,21 +37,59 @@ function palmXY(lm) {
 }
 
 // 한 프레임의 손 결과 처리 (테스트에서 직접 넣을 수 있게 분리)
+let nextId = 1;
+const ASPECT = 4 / 3;   // 정규화 좌표 x 를 실제 비율로(카메라 4:3)
+
+// 검지 끝이 최근 CIRCLE_MS 동안 한 바퀴 돌았나
+function isCircle(trail, palm) {
+  if (trail.length < 12) return false;
+  let cx = 0, cy = 0;
+  for (const p of trail) { cx += p.x; cy += p.y; }
+  cx /= trail.length; cy /= trail.length;
+  let sum = 0, prev = null, rs = [];
+  for (const p of trail) {
+    const a = Math.atan2(p.y - cy, p.x - cx);
+    rs.push(Math.hypot(p.x - cx, p.y - cy));
+    if (prev != null) { let d = a - prev; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; sum += d; }
+    prev = a;
+  }
+  const mr = rs.reduce((a, b) => a + b, 0) / rs.length;
+  const sd = Math.sqrt(rs.reduce((a, r) => a + (r - mr) ** 2, 0) / rs.length);
+  return Math.abs(sum) >= CIRCLE_TURN * 2 * Math.PI && mr > 0.25 * palm && sd / mr < 0.5;
+}
+
 function process(list, now) {
   const seen = new Set();
   const marks = [];
-  for (const { key, lm } of list) {
-    seen.add(key);
+  const ids = [];
+  for (const { lm } of list) {
     const r = openness(lm);
     const pos = palmXY(lm);
-    let h = hands.get(key);
-    if (!h) { h = { state: "unknown", openAt: 0, closedAt: 0, lastFire: 0 }; hands.set(key, h); }
+    // 가장 가까운 기존 손과 이어 붙임(손 두 개가 같은 '오른손'으로 잡혀도 섞이지 않게)
+    let h = null, best = 90;
+    for (const [id, c] of hands) {
+      if (seen.has(id) || c.x == null) continue;
+      const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+      if (d < best) { best = d; h = c; }
+    }
+    if (!h) { h = { id: nextId++, state: "unknown", openAt: 0, closedAt: 0, lastFire: 0, lastCircle: 0, trail: [] }; hands.set(h.id, h); }
+    seen.add(h.id); ids.push(h.id);
     h.seen = now;
     // 손 위치를 부드럽게 따라감
     h.x = h.x == null ? pos.x : h.x + (pos.x - h.x) * 0.5;
     h.y = h.y == null ? pos.y : h.y + (pos.y - h.y) * 0.5;
 
     h.ratio = r;
+
+    // 검지 끝 궤적 → 원 그리기 감지
+    const tip = { x: (1 - lm[8].x) * ASPECT, y: lm[8].y, t: now, raw: lm[8] };
+    h.trail.push(tip);
+    while (h.trail.length && now - h.trail[0].t > CIRCLE_MS) h.trail.shift();
+    const palm = Math.hypot((lm[0].x - lm[9].x) * ASPECT, lm[0].y - lm[9].y);
+    if (h.state !== "closed" && now - h.lastCircle > CIRCLE_COOL && isCircle(h.trail, palm)) {
+      window.__fw && window.__fw.show && window.__fw.show();
+      h.lastCircle = now; h.trail = [];
+    }
     if (r > OPEN_T) {
       if (h.state === "closed" && now - h.openAt < BLINK_MS && now - h.lastFire > COOLDOWN_MS) {
         window.__fw && window.__fw.launch(h.x, h.y);
@@ -64,9 +105,11 @@ function process(list, now) {
     marks.push({ x: h.x, y: h.y, open: h.state !== "closed" });
   }
   for (const [k, h] of hands) if (!seen.has(k) && now - h.seen > LOST_MS) hands.delete(k);
+  lastIds = ids;
   if (window.__fw) window.__fw.hands = marks;
 }
-window.__hand = { process, openness, hands };
+let lastIds = [];
+window.__hand = { process, openness, hands, isCircle };
 
 // ── 위쪽 카메라 칸: 거울 컬러 영상 + 손 뼈대(흰 선·분홍 관절) + 상태 ─────────
 const camCanvas = document.getElementById("camc");
@@ -89,9 +132,18 @@ function drawCam(video, res, connections, now) {
   const P = (p) => [w - (ox + p.x * dw), oy + p.y * dh];    // 랜드마크 → 화면(거울)
   const u = w / 400;                                       // 선 굵기 기준
   (res.landmarks || []).forEach((lm, i) => {
-    const key = res.handedness?.[i]?.[0]?.categoryName || String(i);
-    const hs = hands.get(key) || {};
+    const hs = hands.get(lastIds[i]) || {};
     const fired = now - (hs.lastFire || -1e9) < 220;
+    const circled = now - (hs.lastCircle || -1e9) < 700;
+    // 검지 끝 궤적(노란 점, 오래된 것일수록 흐리게)
+    const tr = hs.trail || [];
+    tr.forEach((p, k) => {
+      const [x, y] = P(p.raw);
+      cc.globalAlpha = 0.15 + 0.85 * (k + 1) / tr.length;
+      cc.fillStyle = "#ffe36b";
+      cc.beginPath(); cc.arc(x, y, 2.2 * u, 0, Math.PI * 2); cc.fill();
+    });
+    cc.globalAlpha = 1;
     const closed = hs.state === "closed";
     cc.lineCap = "round";
     cc.strokeStyle = "rgba(255,255,255,.95)"; cc.lineWidth = (fired ? 3.2 : 1.6) * u;
@@ -112,7 +164,7 @@ function drawCam(video, res, connections, now) {
     const r = hs.ratio || 0, max = 2.4;
     cc.fillStyle = "rgba(0,0,0,.55)"; cc.fillRect(bx - 4 * u, by - 4 * u, bw + 8 * u, 22 * u);
     cc.fillStyle = "#fff"; cc.font = `600 ${9 * u}px system-ui, sans-serif`; cc.textBaseline = "top";
-    cc.fillText(fired ? "터짐!" : closed ? "쥠" : "펴짐", bx, by);
+    cc.fillText(circled ? "원! 축포" : fired ? "터짐!" : closed ? "쥠" : "펴짐", bx, by);
     cc.fillStyle = "rgba(255,255,255,.25)"; cc.fillRect(bx, by + 12 * u, bw, 3 * u);
     cc.fillStyle = "#fff"; cc.fillRect(bx, by + 12 * u, Math.min(1, r / max) * bw, 3 * u);
     cc.fillStyle = "#ff5a5a"; cc.fillRect(bx + (CLOSE_T / max) * bw, by + 10 * u, 1.5 * u, 7 * u);
