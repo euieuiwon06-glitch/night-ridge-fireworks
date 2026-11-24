@@ -438,7 +438,7 @@
   function show() {
     let minRidge = H;
     for (let x = 0; x < W; x++) minRidge = Math.min(minRidge, ridge[x]);
-    const n = 7 + ((Math.random() * 3) | 0);
+    const n = 5 + ((Math.random() * 2) | 0);          // 원 축포 5~6발("너무 많다" → 7~9에서 줄임, 불꽃 호수와 같음)
     let t = 0;
     for (let i = 0; i < n; i++) {
       t += rand(90, 200);
