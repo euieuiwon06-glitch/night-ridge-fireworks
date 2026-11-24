@@ -1,5 +1,5 @@
 // 웹캠 손 인식 → 손을 쥐었다 펴면(깜빡) 그 위치에서 폭죽
-// 영상은 화면에 안 띄우고 브라우저 안에서만 손 위치를 읽음.
+// 위쪽 #cam 영역에 거울 영상 + 손 뼈대를 그림(영상은 브라우저 밖으로 안 나감).
 const VISION = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
@@ -20,13 +20,17 @@ function openness(lm) {
   return (d(8, 0) + d(12, 0) + d(16, 0) + d(20, 0)) / 4 / palm;
 }
 
+// 카메라 화면(위) 속 손 위치 → 폭죽 화면(아래)의 보이는 하늘 위치
+// view: 영상이 카메라 칸에 '꽉 채우기'로 그려진 비율(가려진 위아래 여백 반영)
+let view = { ox: 0, oy: 0, sx: 1, sy: 1 };
 function palmXY(lm) {
   let x = 0, y = 0;
   for (const k of [0, 5, 9, 13, 17]) { x += lm[k].x; y += lm[k].y; }
-  // 거울처럼 좌우 반전, 화면 가장자리까지 닿기 쉽게 살짝 확대
-  const nx = 1 - x / 5, ny = y / 5;
-  const s = (v) => Math.min(1, Math.max(0, (v - 0.5) * 1.25 + 0.5));
-  return { x: s(nx) * W, y: s(ny) * H };
+  const vx = 1 - (view.ox + (x / 5) * view.sx);         // 거울
+  const vy = view.oy + (y / 5) * view.sy;
+  const s = (v) => Math.min(1, Math.max(0, (v - 0.5) * 1.25 + 0.5)); // 가장자리까지 닿기 쉽게
+  const top = (window.__fw && window.__fw.visTop) || 0;
+  return { x: s(vx) * W, y: top + s(vy) * (H - top) };
 }
 
 // 한 프레임의 손 결과 처리 (테스트에서 직접 넣을 수 있게 분리)
@@ -62,79 +66,60 @@ function process(list, now) {
   for (const [k, h] of hands) if (!seen.has(k) && now - h.seen > LOST_MS) hands.delete(k);
   if (window.__fw) window.__fw.hands = marks;
 }
-window.__hand = { process, openness, hands, draw: (...a) => drawPreview(...a) };
+window.__hand = { process, openness, hands };
 
-// ── 오른쪽 미리보기: 카메라에 내 모습이 어떻게 감지되는지 ──────────
-const PV_W = 240, PV_H = 180;
-let pv = null;
-function makePreview() {
-  const box = document.createElement("div");
-  box.id = "hand-preview";
-  box.innerHTML = `<canvas width="${PV_W * 2}" height="${PV_H * 2}"></canvas>
-    <div class="cap">손을 편 채로 비춘 뒤, 주먹 쥐었다 펴면 폭죽</div>`;
-  const st = document.createElement("style");
-  st.textContent = `
-    #hand-preview { position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
-      width: ${PV_W}px; pointer-events: none; font: 11px/1.5 "Pretendard", system-ui, sans-serif;
-      color: #8a8a8a; letter-spacing: .02em; }
-    #hand-preview canvas { display: block; width: ${PV_W}px; height: ${PV_H}px;
-      border: 1px solid #333; background: #000; }
-    #hand-preview .cap { margin-top: 6px; }
-    @media (max-width: 720px) {
-      #hand-preview { top: auto; bottom: 12px; right: 12px; width: 132px; transform: none; }
-      #hand-preview canvas { width: 132px; height: 99px; }
-      #hand-preview .cap { display: none; }
-    }`;
-  document.head.appendChild(st);
-  document.body.appendChild(box);
-  return box.querySelector("canvas").getContext("2d");
-}
-
-function drawPreview(video, res, connections, now) {
-  if (!pv) pv = makePreview();
-  const c = pv, w = PV_W * 2, h = PV_H * 2;
-  // 거울 영상(흑백, 살짝 어둡게)
-  c.save();
-  c.filter = "grayscale(1) brightness(0.55) contrast(1.1)";
-  c.translate(w, 0); c.scale(-1, 1);
+// ── 위쪽 카메라 칸: 거울 컬러 영상 + 손 뼈대(흰 선·분홍 관절) + 상태 ─────────
+const camCanvas = document.getElementById("camc");
+const cc = camCanvas.getContext("2d");
+let hintEl = document.querySelector("#cam .hint");
+function drawCam(video, res, connections, now) {
+  if (hintEl) { hintEl.remove(); hintEl = null; }
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(camCanvas.clientWidth * dpr), h = Math.round(camCanvas.clientHeight * dpr);
+  if (camCanvas.width !== w || camCanvas.height !== h) { camCanvas.width = w; camCanvas.height = h; }
   const vw = video.videoWidth, vh = video.videoHeight;
-  const s = Math.max(w / vw, h / vh);                     // 꽉 채우기(가운데 기준 자름)
+  const s = Math.max(w / vw, h / vh);                      // 꽉 채우기(가운데 기준 자름)
   const dw = vw * s, dh = vh * s, ox = (w - dw) / 2, oy = (h - dh) / 2;
-  c.drawImage(video, ox, oy, dw, dh);
-  c.restore();
-  c.filter = "none";
+  view = { ox: ox / w, oy: oy / h, sx: dw / w, sy: dh / h };
+  cc.save();
+  cc.translate(w, 0); cc.scale(-1, 1);
+  cc.drawImage(video, ox, oy, dw, dh);
+  cc.restore();
 
-  const P = (p) => [w - (ox + p.x * dw), oy + p.y * dh];   // 랜드마크 → 미리보기 좌표(거울)
+  const P = (p) => [w - (ox + p.x * dw), oy + p.y * dh];    // 랜드마크 → 화면(거울)
+  const u = w / 400;                                       // 선 굵기 기준
   (res.landmarks || []).forEach((lm, i) => {
     const key = res.handedness?.[i]?.[0]?.categoryName || String(i);
     const hs = hands.get(key) || {};
     const fired = now - (hs.lastFire || -1e9) < 220;
     const closed = hs.state === "closed";
-    const ink = fired ? "#ffffff" : closed ? "#9fd7ff" : "#e8e8e8";
-    c.strokeStyle = ink; c.fillStyle = ink; c.lineWidth = fired ? 4 : 2;
+    cc.lineCap = "round";
+    cc.strokeStyle = "rgba(255,255,255,.95)"; cc.lineWidth = (fired ? 3.2 : 1.6) * u;
     for (const { start, end } of connections) {
       const [x0, y0] = P(lm[start]), [x1, y1] = P(lm[end]);
-      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+      cc.beginPath(); cc.moveTo(x0, y0); cc.lineTo(x1, y1); cc.stroke();
     }
-    for (const p of lm) { const [x, y] = P(p); c.fillRect(x - 3, y - 3, 6, 6); }
-
-    // 손목 옆: 상태 + 펼침 정도 막대(기준선 2개: 쥠 / 펴짐)
+    for (const p of lm) {
+      const [x, y] = P(p);
+      cc.beginPath(); cc.arc(x, y, (fired ? 4 : 3) * u, 0, Math.PI * 2);
+      cc.fillStyle = closed ? "#9fd7ff" : "#ffb3c1"; cc.fill();
+      cc.lineWidth = 1 * u; cc.strokeStyle = "#fff"; cc.stroke();
+    }
+    // 손목 아래: 상태 + 펼침 막대(빨강 = 쥠 기준, 초록 = 펴짐 기준)
     const [wx, wy] = P(lm[0]);
-    const bx = Math.min(w - 130, Math.max(8, wx - 60)), by = Math.min(h - 40, wy + 18);
-    const r = hs.ratio || 0, max = 2.4, bw = 120;
-    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(bx - 6, by - 6, bw + 12, 40);
-    c.fillStyle = ink; c.font = "bold 20px Pretendard, system-ui, sans-serif";
-    c.fillText(fired ? "터짐!" : closed ? "쥠" : "펴짐", bx, by + 14);
-    c.fillStyle = "#444"; c.fillRect(bx, by + 22, bw, 6);
-    c.fillStyle = ink; c.fillRect(bx, by + 22, Math.min(1, r / max) * bw, 6);
-    c.fillStyle = "#ff5a5a"; c.fillRect(bx + (CLOSE_T / max) * bw, by + 19, 2, 12);
-    c.fillStyle = "#5aff8a"; c.fillRect(bx + (OPEN_T / max) * bw, by + 19, 2, 12);
+    const bw = 70 * u, bx = Math.min(w - bw - 6 * u, Math.max(6 * u, wx - bw / 2));
+    const by = Math.min(h - 22 * u, wy + 10 * u);
+    const r = hs.ratio || 0, max = 2.4;
+    cc.fillStyle = "rgba(0,0,0,.55)"; cc.fillRect(bx - 4 * u, by - 4 * u, bw + 8 * u, 22 * u);
+    cc.fillStyle = "#fff"; cc.font = `600 ${9 * u}px system-ui, sans-serif`; cc.textBaseline = "top";
+    cc.fillText(fired ? "터짐!" : closed ? "쥠" : "펴짐", bx, by);
+    cc.fillStyle = "rgba(255,255,255,.25)"; cc.fillRect(bx, by + 12 * u, bw, 3 * u);
+    cc.fillStyle = "#fff"; cc.fillRect(bx, by + 12 * u, Math.min(1, r / max) * bw, 3 * u);
+    cc.fillStyle = "#ff5a5a"; cc.fillRect(bx + (CLOSE_T / max) * bw, by + 10 * u, 1.5 * u, 7 * u);
+    cc.fillStyle = "#5aff8a"; cc.fillRect(bx + (OPEN_T / max) * bw, by + 10 * u, 1.5 * u, 7 * u);
   });
-  if (!(res.landmarks || []).length) {
-    c.fillStyle = "#8a8a8a"; c.font = "20px Pretendard, system-ui, sans-serif";
-    c.fillText("손이 보이지 않아요", 16, h - 18);
-  }
 }
+window.__hand.draw = (...a) => drawCam(...a);
 
 async function start() {
   if (!navigator.mediaDevices?.getUserMedia) return;
@@ -150,6 +135,7 @@ async function start() {
   const video = document.createElement("video");
   video.muted = true; video.playsInline = true; video.srcObject = stream;
   await video.play();
+  if (hintEl) hintEl.textContent = "손 인식 준비 중…";
 
   const { FilesetResolver, HandLandmarker } = await import(`${VISION}/vision_bundle.mjs`);
   const fileset = await FilesetResolver.forVisionTasks(`${VISION}/wasm`);
@@ -172,7 +158,7 @@ async function start() {
         key: res.handedness?.[i]?.[0]?.categoryName || String(i), lm: l,
       }));
       process(list, now);
-      drawPreview(video, res, HandLandmarker.HAND_CONNECTIONS, now);
+      drawCam(video, res, HandLandmarker.HAND_CONNECTIONS, now);
       window.__hand.last = { video, conn: HandLandmarker.HAND_CONNECTIONS };
     }
     requestAnimationFrame(loop);

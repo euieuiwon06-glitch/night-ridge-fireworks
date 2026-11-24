@@ -96,14 +96,18 @@
   };
   mimg.src = window.MOUNTAINS_PNG;
 
-  // ── 화면 맞춤: 기기 픽셀 기준 정수배 확대 ────────────────
+  // ── 화면 맞춤: 9:16 무대를 화면에 꽉 맞추고, 아래 영역(#art)에 그림을 바닥 기준으로 채움 ──
+  // 아래 영역이 4:5보다 납작하므로 그림 맨 위(검은 하늘)가 조금 잘림 → visTop
+  let visTop = 0;
   function fit() {
-    const dpr = window.devicePixelRatio || 1;
-    const k = Math.min(innerWidth * dpr / W, innerHeight * dpr / H);
-    // 정수배가 화면의 90% 이상을 채우면 정수배(픽셀 고르게), 아니면 꽉 채우기
-    const s = (k >= 1 && Math.floor(k) / k >= 0.9 ? Math.floor(k) : k) / dpr;
-    cv.style.width = W * s + "px";
-    cv.style.height = H * s + "px";
+    const stage = document.getElementById("stage");
+    const sw = Math.floor(Math.min(innerWidth, innerHeight * 9 / 16));
+    stage.style.setProperty("--sw", sw + "px");
+    const art = document.getElementById("art");
+    const ah = art.clientHeight, cw = sw, ch = cw * H / W;
+    cv.style.height = ch + "px";
+    visTop = Math.max(0, (ch - ah) / ch * H);           // 잘린 윗부분(격자 칸)
+    if (window.__fw) window.__fw.visTop = visTop;
   }
   addEventListener("resize", fit);
   fit();
@@ -233,7 +237,7 @@
   function launch(tx, ty, kind) {
     tx = Math.max(8, Math.min(W - 9, tx));
     const top = ridge[tx | 0] < H ? ridge[tx | 0] : H;
-    ty = Math.max(14, Math.min(ty, top - MIN_ABOVE_RIDGE));
+    ty = Math.max(visTop + 14, Math.min(ty, top - MIN_ABOVE_RIDGE));
     const sx = tx + rand(-6, 6);
     const sy = Math.min(H + 2, top + 30);               // 산 뒤에서 출발
     const T = Math.max(26, Math.min(58, (sy - ty) / 4.2)) | 0; // 올라가는 프레임 수
@@ -418,7 +422,7 @@
   requestAnimationFrame(frame);
 
   // ── 입력: 좌클릭/터치할 때마다 발사 ─────────────────────
-  addEventListener("pointerdown", (e) => {
+  document.getElementById("art").addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !ready) return;
     const r = cv.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width * W;
@@ -428,5 +432,6 @@
   addEventListener("contextmenu", (e) => e.preventDefault());
 
   // 확인용: window.__fw.launch(x, y)
-  window.__fw = { launch, hands: [], get count() { return parts.length + rockets.length; } };
+  window.__fw = { launch, hands: [], visTop, get count() { return parts.length + rockets.length; } };
+  fit();
 })();
