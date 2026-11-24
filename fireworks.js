@@ -292,6 +292,22 @@
     }
   }
 
+  // ── 손 표시(hand.js가 window.__fw.hands 에 넣어 줌): 편 손 = 점선 고리, 쥔 손 = 작은 고리 ──
+  function drawHands() {
+    const hs = window.__fw && window.__fw.hands;
+    if (!hs || !hs.length) return;
+    for (const h of hs) {
+      const cx = h.x | 0, cy = h.y | 0, r = h.open ? 5 : 2;
+      const n = h.open ? 24 : 12;
+      for (let k = 0; k < n; k++) {
+        if (h.open && k % 2) continue;                 // 편 손은 점선
+        const a = (k / n) * Math.PI * 2;
+        const x = Math.round(cx + Math.cos(a) * r), y = Math.round(cy + Math.sin(a) * r);
+        if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = WHITE;
+      }
+    }
+  }
+
   function updateSnow() {
     for (let i = 0; i < flakes.length; i++) {
       const f = flakes[i];
@@ -383,6 +399,7 @@
     cur = null;
     drawMountainGlow();
     drawSnow();
+    drawHands();
     ctx.putImageData(img, 0, 0);
   }
 
@@ -410,5 +427,5 @@
   addEventListener("contextmenu", (e) => e.preventDefault());
 
   // 확인용: window.__fw.launch(x, y)
-  window.__fw = { launch, get count() { return parts.length + rockets.length; } };
+  window.__fw = { launch, hands: [], get count() { return parts.length + rockets.length; } };
 })();
