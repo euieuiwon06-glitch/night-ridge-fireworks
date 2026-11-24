@@ -167,18 +167,6 @@ function drawCam(video, res, connections, now) {
       cc.fillStyle = closed ? "#9fd7ff" : "#ffb3c1"; cc.fill();
       cc.lineWidth = 1 * u; cc.strokeStyle = "#fff"; cc.stroke();
     }
-    // 손목 아래: 상태 + 펼침 막대(빨강 = 쥠 기준, 초록 = 펴짐 기준)
-    const [wx, wy] = P(lm[0]);
-    const bw = 70 * u, bx = Math.min(w - bw - 6 * u, Math.max(6 * u, wx - bw / 2));
-    const by = Math.min(h - 22 * u, wy + 10 * u);
-    const r = hs.ratio || 0, max = 2.4;
-    cc.fillStyle = "rgba(0,0,0,.55)"; cc.fillRect(bx - 4 * u, by - 4 * u, bw + 8 * u, 22 * u);
-    cc.fillStyle = "#fff"; cc.font = `600 ${9 * u}px system-ui, sans-serif`; cc.textBaseline = "top";
-    cc.fillText(circled ? "원! 축포" : fired ? "터짐!" : closed ? "쥠" : "펴짐", bx, by);
-    cc.fillStyle = "rgba(255,255,255,.25)"; cc.fillRect(bx, by + 12 * u, bw, 3 * u);
-    cc.fillStyle = "#fff"; cc.fillRect(bx, by + 12 * u, Math.min(1, r / max) * bw, 3 * u);
-    cc.fillStyle = "#ff5a5a"; cc.fillRect(bx + (CLOSE_T / max) * bw, by + 10 * u, 1.5 * u, 7 * u);
-    cc.fillStyle = "#5aff8a"; cc.fillRect(bx + (OPEN_T / max) * bw, by + 10 * u, 1.5 * u, 7 * u);
   });
 }
 window.__hand.draw = (...a) => drawCam(...a);
