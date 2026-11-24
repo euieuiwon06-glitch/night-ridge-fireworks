@@ -101,7 +101,9 @@
   let visTop = 0;
   function fit() {
     const stage = document.getElementById("stage");
-    const sw = Math.floor(Math.min(innerWidth, innerHeight * 9 / 16));
+    // 기본 = 9:16(위 카메라 + 아래 폭죽), 전체 모드(Tab) = 폭죽 그림만 4:5로 화면 가득
+    const full = document.body.classList.contains("full");
+    const sw = Math.floor(full ? Math.min(innerWidth, innerHeight * W / H) : Math.min(innerWidth, innerHeight * 9 / 16));
     stage.style.setProperty("--sw", sw + "px");
     const art = document.getElementById("art");
     const ah = art.clientHeight, cw = sw, ch = cw * H / W;
@@ -423,7 +425,7 @@
 
   // ── 입력: 좌클릭/터치할 때마다 발사 ─────────────────────
   document.getElementById("art").addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !ready) return;
+    if (e.button !== 0 || !ready || full) return;          // 전체 모드에선 클릭 대신 스페이스바
     const r = cv.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width * W;
     const y = (e.clientY - r.top) / r.height * H;
@@ -443,6 +445,29 @@
       setTimeout(() => launch(rand(24, W - 24), rand(visTop + 18, minRidge - 45), pick(KIND_POOL)), t);
     }
   }
-  window.__fw = { launch, show, hands: [], visTop, get count() { return parts.length + rockets.length; } };
+  // ── Tab = 전체 화면 모드 전환, 전체 모드에서 스페이스바 = 무작위 폭죽 ──
+  let full = false, lastSpace = 0;
+  function setFull(on) {
+    full = on;
+    document.body.classList.toggle("full", on);
+    window.__fw.full = on;
+    if (on) window.__fw.hands = [];
+    fit();
+  }
+  addEventListener("keydown", (e) => {
+    if (e.code === "Tab") { e.preventDefault(); if (!e.repeat) setFull(!full); return; }
+    if (e.code === "Space") {
+      e.preventDefault();
+      if (!full || !ready) return;
+      const now = performance.now();
+      if (now - lastSpace < 120) return;                   // 꾹 누르면 0.12초마다
+      lastSpace = now;
+      let minRidge = H;
+      for (let x = 0; x < W; x++) minRidge = Math.min(minRidge, ridge[x]);
+      launch(rand(24, W - 24), rand(visTop + 18, minRidge - 40), pick(KIND_POOL));
+    }
+  });
+
+  window.__fw = { launch, show, setFull, full: false, hands: [], visTop, get count() { return parts.length + rockets.length; } };
   fit();
 })();

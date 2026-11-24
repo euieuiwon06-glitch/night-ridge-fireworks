@@ -9,8 +9,8 @@ const CLOSE_T = 1.3;     // 이보다 작으면 '쥔 손' (쉽게: 1.15→1.3)
 const BLINK_MS = 1000;   // 편 손 → 쥠 → 다시 펴기 를 이 시간 안에 하면 발사
 const COOLDOWN_MS = 250; // 연속 발사 최소 간격(손마다)
 const LOST_MS = 400;     // 손이 이 시간 넘게 안 보이면 상태 초기화
-const CIRCLE_MS = 1400;  // 검지 끝 궤적을 이 시간만큼 보고 원인지 판단
-const CIRCLE_TURN = 0.9; // 한 바퀴(360°)의 이 비율 이상 돌면 원
+const CIRCLE_MS = 2000;  // 검지 끝 궤적을 이 시간만큼 보고 원인지 판단
+const CIRCLE_TURN = 0.6; // 한 바퀴(360°)의 이 비율 이상 돌면 원 (대충 그려도 되게: 0.9→0.6)
 const CIRCLE_COOL = 1500;// 원 축포 후 다음 원까지 최소 간격
 // ────────────────────────────────────────────────────────
 
@@ -42,20 +42,30 @@ const ASPECT = 4 / 3;   // 정규화 좌표 x 를 실제 비율로(카메라 4:3
 
 // 검지 끝이 최근 CIRCLE_MS 동안 한 바퀴 돌았나
 function isCircle(trail, palm) {
-  if (trail.length < 12) return false;
+  if (trail.length < 10) return false;
   let cx = 0, cy = 0;
   for (const p of trail) { cx += p.x; cy += p.y; }
   cx /= trail.length; cy /= trail.length;
-  let sum = 0, prev = null, rs = [];
-  for (const p of trail) {
-    const a = Math.atan2(p.y - cy, p.x - cx);
-    rs.push(Math.hypot(p.x - cx, p.y - cy));
-    if (prev != null) { let d = a - prev; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; sum += d; }
+  // 선 모양(왕복)은 원이 아님: 궤적이 퍼진 정도의 짧은 축/긴 축 비율
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const p of trail) { const dx = p.x - cx, dy = p.y - cy; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+  const tr = sxx + syy, det = sxx * syy - sxy * sxy;
+  const disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+  const l1 = tr / 2 + disc, l2 = tr / 2 - disc;
+  if (l1 <= 0 || Math.sqrt(Math.max(0, l2) / l1) < 0.2) return false;
+
+  const rs = trail.map((p) => Math.hypot(p.x - cx, p.y - cy));
+  const mr0 = rs.reduce((a, b) => a + b, 0) / rs.length;
+  let sum = 0, prev = null;
+  for (let i = 0; i < trail.length; i++) {
+    if (rs[i] < 0.35 * mr0) continue;                  // 중심 근처 점은 각도가 튀니 제외
+    const a = Math.atan2(trail[i].y - cy, trail[i].x - cx);
+    if (prev != null) { let d = a - prev; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; if (Math.abs(d) < 2.2) sum += d; }
     prev = a;
   }
-  const mr = rs.reduce((a, b) => a + b, 0) / rs.length;
+  const mr = mr0;
   const sd = Math.sqrt(rs.reduce((a, r) => a + (r - mr) ** 2, 0) / rs.length);
-  return Math.abs(sum) >= CIRCLE_TURN * 2 * Math.PI && mr > 0.25 * palm && sd / mr < 0.5;
+  return Math.abs(sum) >= CIRCLE_TURN * 2 * Math.PI && mr > 0.15 * palm && sd / mr < 0.8;
 }
 
 function process(list, now) {
@@ -202,7 +212,7 @@ async function start() {
 
   let lastT = -1;
   const loop = () => {
-    if (!window.__hand.freeze && video.readyState >= 2 && video.currentTime !== lastT) {
+    if (!window.__hand.freeze && !(window.__fw && window.__fw.full) && video.readyState >= 2 && video.currentTime !== lastT) {
       lastT = video.currentTime;
       const now = performance.now();
       const res = lm.detectForVideo(video, now);
